@@ -202,6 +202,10 @@
     </div>
 
     <script>
+        function isValidGithubUrl(url) {
+            return /^https:\/\/github\.com\/[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\/[a-zA-Z0-9._\-]+(\.git)?\/?$/.test(url);
+        }
+
         async function convertProject() {
             const gitUrl = document.getElementById('gitUrl').value.trim();
             const loading = document.getElementById('loading');
@@ -211,6 +215,14 @@
 
             if (!gitUrl) {
                 alert('Please enter a Git repository URL');
+                return;
+            }
+
+            if (!isValidGithubUrl(gitUrl)) {
+                resultSection.style.display = 'block';
+                status.className = 'status error';
+                status.textContent = '✗ Invalid GitHub URL. Expected: https://github.com/<owner>/<repo>';
+                resultContent.innerHTML = '';
                 return;
             }
 
