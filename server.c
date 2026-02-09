@@ -125,8 +125,84 @@ char *extract_repo_name(const char *git_url) {
     }
 }
 
+int validate_github_url(const char *url) {
+    if (!url || *url == '\0') return 0;
+
+    for (const char *p = url; *p; p++) {
+        if (*p == ';' || *p == '|' || *p == '&' || *p == '$' ||
+            *p == '`' || *p == '(' || *p == ')' || *p == '{' ||
+            *p == '}' || *p == '<' || *p == '>' || *p == '\'' ||
+            *p == '"' || *p == '\\' || *p == '\n' || *p == '\r' ||
+            *p == ' ' || *p == '\t')
+            return 0;
+    }
+
+    const char *prefix = "https://github.com/";
+    if (strncmp(url, prefix, strlen(prefix)) != 0)
+        return 0;
+
+    const char *path = url + strlen(prefix);
+    char buf[512];
+    strncpy(buf, path, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '/')
+        buf[--len] = '\0';
+
+    if (len >= 4 && strcmp(buf + len - 4, ".git") == 0) {
+        buf[len - 4] = '\0';
+        len -= 4;
+    }
+
+    if (len == 0) return 0;
+
+    char *slash = strchr(buf, '/');
+    if (!slash || slash == buf) return 0;
+    *slash = '\0';
+
+    const char *owner = buf;
+    const char *repo = slash + 1;
+
+    size_t owner_len = strlen(owner);
+    size_t repo_len = strlen(repo);
+
+    if (owner_len == 0 || owner_len > 39) return 0;
+    if (repo_len == 0 || repo_len > 100) return 0;
+
+    if (strchr(repo, '/')) return 0;
+
+    if (owner[0] == '-' || owner[owner_len - 1] == '-') return 0;
+    for (size_t i = 0; i < owner_len; i++) {
+        char c = owner[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-'))
+            return 0;
+    }
+
+    for (size_t i = 0; i < repo_len; i++) {
+        char c = repo[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_'))
+            return 0;
+    }
+
+    return 1;
+}
+
+int verify_github_repo(const char *url) {
+
+    if (!validate_github_url(url)) return 0;
+    char command[512];
+    snprintf(command, sizeof(command),
+             "git ls-remote \"%s\" HEAD >/dev/null 2>&1", url);
+    int status = system(command);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 int clone_repository(const char *git_url, const char *target_dir) {
     char command[1024];
+    snprintf(command, sizeof(command), "git clone --depth 1 \"%s\" \"%s\" 2>/dev/null",
     snprintf(command, sizeof(command), "git clone --depth 1 %s %s 2>/dev/null",
              git_url, target_dir);
     return (system(command) == 0);
@@ -1026,10 +1102,24 @@ ConversionResult *convert_git_repository(const char *git_url) {
     if (!result) return NULL;
 
     result->git_url = strdup(git_url);
+
+    if (!validate_github_url(git_url)) {
+        result->error = strdup(
+            "Invalid GitHub URL. Expected: https://github.com/<owner>/<repo>");
+        return result;
+    }
+
+    printf("Verifying repository: %s\n", git_url);
+    if (!verify_github_repo(git_url)) {
+        result->error = strdup(
+            "Repository not found or not accessible on GitHub");
+        return result;
+    }
+
     result->repo_name = extract_repo_name(git_url);
 
     if (!result->repo_name) {
-        result->error = strdup("Invalid repository URL");
+        result->error = strdup("Failed to extract repository name from URL");
         return result;
     }
 
